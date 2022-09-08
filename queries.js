@@ -169,11 +169,14 @@ const createListQuery = (model) => {
             ) {
                 data {
                     id
+                    createdBy {
+                        id
+                    }
                     savedOn
                     meta {
                         ${CONTENT_META_FIELDS}
                     }
-                    ${getModelTitleFieldId(model)}
+                    ${createFieldsList(model.fields)}
                 }
                 meta {
                     cursor
@@ -186,12 +189,46 @@ const createListQuery = (model) => {
     `;
 };
 
+const createCreateMutation = (modelId) => {
+    const ucFirstModelId = upperFirst(modelId);
+
+    return gql`
+        mutation CmsEntriesCreate${ucFirstModelId}($data: ${ucFirstModelId}Input!) {
+            content: create${ucFirstModelId}(data: $data) {
+                data {
+                    id
+                    savedOn
+                    meta {
+                        ${CONTENT_META_FIELDS}
+                    }
+                }
+                error ${ERROR_FIELD}
+            }
+        }
+    `;
+};
+
+const createPublishMutation = (modelId) => {
+    const ucFirstModelId = upperFirst(modelId);
+
+    return gql`
+        mutation CmsPublish${ucFirstModelId}($revision: ID!) {
+            content: publish${ucFirstModelId}(revision: $revision) {
+                data {
+                    id
+                    meta {
+                        ${CONTENT_META_FIELDS}
+                    }
+                }
+                error ${ERROR_FIELD}
+            }
+        }`;
+};
+
 function createFieldsList(fields) {
     return fields.map(field => {
         if (field.type == "ref") {
-            return "";
-            //TODO: Add support for Ref types.
-            return `{
+            return `${field.fieldId} {
                         id
                         modelId
                     }`;
@@ -216,5 +253,7 @@ module.exports = {
     DELETE_CONTENT_MODEL,
     LIST_CONTENT_MODELS_WITH_GROUPS,
     createListQuery,
-    createReadQuery
+    createReadQuery,
+    createCreateMutation,
+    createPublishMutation
 };
