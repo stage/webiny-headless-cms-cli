@@ -271,8 +271,8 @@ const importEntriesData = async (data, model) => {
                             }
                         );
 
-                        if (publishResponse.data.error) {
-                            ctx.errors.push(publishResponse.data.error);
+                        if (publishResponse.content.error) {
+                            ctx.errors.push(publishResponse.content.error);
                         }
                     }
                 }
