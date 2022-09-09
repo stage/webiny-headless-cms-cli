@@ -127,10 +127,21 @@ const importModelData = async (data) => {
     }
 };
 
-const getEntriesDataFromRemote = async (model) => {
+const getEntriesDataFromRemoteExport = async (model) => {
     const exportClient = new GraphQLClient(config.export.MANAGE_ENDPOINT, {
         headers: { Authorization: config.export.API_KEY },
     });
+    return getEntriesDataFromRemoteBase(exportClient, model)
+}
+
+const getEntriesDataFromRemoteImport = async (model) => {
+    const importClient = new GraphQLClient(config.import.MANAGE_ENDPOINT, {
+        headers: { Authorization: config.import.API_KEY },
+    });
+    return getEntriesDataFromRemoteBase(importClient, model)
+}
+
+const getEntriesDataFromRemoteBase = async (client, model) => {
 
     const tasks = new Listr([
         {
@@ -142,7 +153,7 @@ const getEntriesDataFromRemote = async (model) => {
 
                 while (counter == 0 || cmsList.content.meta.hasMoreItems == true) {
                     counter++;
-                    cmsList = await exportClient.request(GQL.createListQuery(model), { after: cmsList?.content?.meta?.cursor });
+                    cmsList = await client.request(GQL.createListQuery(model), { after: cmsList?.content?.meta?.cursor });
                     entries = entries.concat(cmsList.content.data)
                     task.output = `Retrieved ${model.modelId} Batch ${counter} | Items: ${cmsList.content.data.length} of ${cmsList.content.meta.totalCount}`;
                 }
@@ -159,57 +170,102 @@ const getEntriesDataFromRemote = async (model) => {
     return output.data;
 };
 
-const importEntriesData = async (data, modelId) => {
+const importEntriesData = async (data, model) => {
     const importClient = new GraphQLClient(config.import.MANAGE_ENDPOINT, {
         headers: { Authorization: config.import.API_KEY },
     });
 
+    //TODO: Make this optional. It's used to determine if the import should update rather than create a new space. This won't scale well with a large number of entries.
+    let remoteEntries = await getEntriesDataFromRemoteImport(model);
+
     //Import content entries 
     const tasks = new Listr([
         {
-            title: `Import content entries for model '${modelId}'`,
+            title: `Import content entries for model '${model.modelId}'`,
             task: async (ctx, task) => {
                 const entriesToImport = data;
-                for (let i = 0; i < entriesToImport.length; i++) {
-                    // Create the Entry
-                    const entry = entriesToImport[i]
 
+                for (let i = 0; i < entriesToImport.length; i++) {
+
+                    const entry = entriesToImport[i];
                     let publishEntry = (entry.meta.status == "published")
 
-                    //Remove Properties that can't be when creating a new entry.
-                    entry.id = undefined;
-                    entry.createdBy = undefined;
-                    entry.savedOn = undefined;
-                    entry.meta = undefined;
+                    //Check if and entry already exists for this entryId.
+                    let existingEntry = entry?.id ? remoteEntries.find(re => re.entryId == entry.id.substring(0, entry.id.indexOf("#"))) : null;
+                    let newRevisionId;
 
-                    task.output = `Creating "${entry.name}"...`;
-                    let query = GQL.createCreateMutation(modelId);
-                    const response = await importClient.request(
-                        query,
-                        {
-                            data: entry,
+                    if (existingEntry) {
+                        //console.log("Entry already exists, creating a revision");
+                        
+                        //Remove Properties that can't be when creating a new entry.
+                        entry.id = undefined;
+                        entry.createdBy = undefined;
+                        entry.savedOn = undefined;
+                        entry.meta = undefined;
+
+                        //Creating a revision
+                        let query = GQL.createCreateFromMutation(model);
+                        const createRevisionResponse = await importClient.request(
+                            query,
+                            {
+                                revision: existingEntry.id,
+                                data: entry,
+                            }
+                        );
+
+                        if (!createRevisionResponse) {
+                            ctx.errors.push(`Failed to create revision ${entry.name}`);
+                            anyErrors = true;
+                            continue;
                         }
-                    );
+                        else if (createRevisionResponse.content.error) {
+                            ctx.errors.push(createRevisionResponse.content.error);
+                            anyErrors = true;
+                            continue;
+                        }
 
-                    if (!response) {
-                        ctx.errors.push(`Failed to create ${entry.name}`);
-                        anyErrors = true;
-                        continue;
-                    }
-                    else if (response.content.error) {
-                        ctx.errors.push(response.content.error);
-                        anyErrors = true;
-                        continue;
+                        newRevisionId = createRevisionResponse.content.data.id;
+                    } else {
+
+                        // Create the Entry
+
+                        //Remove Properties that can't be when creating a new entry.
+                        entry.id = undefined;
+                        entry.createdBy = undefined;
+                        entry.savedOn = undefined;
+                        entry.meta = undefined;
+
+                        task.output = `Creating "${entry.name}"...`;
+                        let query = GQL.createCreateMutation(model.modelId);
+                        const response = await importClient.request(
+                            query,
+                            {
+                                data: entry,
+                            }
+                        );
+
+                        if (!response) {
+                            ctx.errors.push(`Failed to create ${entry.name}`);
+                            anyErrors = true;
+                            continue;
+                        }
+                        else if (response.content.error) {
+                            ctx.errors.push(response.content.error);
+                            anyErrors = true;
+                            continue;
+                        }
+
+                        newRevisionId = response.content.data.id;
                     }
 
-                    if (publishEntry) {
+                    if (publishEntry && newRevisionId) {
                         // Publish the model if needed
                         task.output = `Publish "${entry.name}"... `;
-                        let publishQuery = GQL.createPublishMutation(modelId);
+                        let publishQuery = GQL.createPublishMutation(model.modelId);
                         const publishResponse = await importClient.request(
                             publishQuery,
                             {
-                                revision: response.content.data.id,
+                                revision: newRevisionId,
                             }
                         );
 
@@ -285,7 +341,7 @@ const importEntriesData = async (data, modelId) => {
                     ]);
 
                 const model = modalData.listContentModels.data.find(m => m.modelId == entryTypeToExport);
-                const entriesDataFromRemote = await getEntriesDataFromRemote(model);
+                const entriesDataFromRemote = await getEntriesDataFromRemoteExport(model);
                 await writeJsonFile(path.resolve(config.export.TO_PATH + "/exported-entries." + model.modelId + ".json"), entriesDataFromRemote);
 
                 break;
@@ -314,7 +370,7 @@ const importEntriesData = async (data, modelId) => {
 
                     try {
                         const entriesDataFromFile = await loadJsonFile(config.export.TO_PATH + "/" + fileToImport);
-                        await importEntriesData(entriesDataFromFile, model.modelId);
+                        await importEntriesData(entriesDataFromFile, model);
                     }
                     catch (ex) {
                         //console.log(`ERROR: model id does not exist on import CMS - ${ex.toString()}`)

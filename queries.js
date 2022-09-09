@@ -169,6 +169,7 @@ const createListQuery = (model) => {
             ) {
                 data {
                     id
+                    entryId
                     createdBy {
                         id
                     }
@@ -239,6 +240,58 @@ function createFieldsList(fields) {
 
 }
 
+function createUpdateMutation(model) {
+    const ucFirstModelId = upperFirst(model.modelId);
+
+    return gql`
+        mutation CmsUpdate${ucFirstModelId}($revision: ID!, $data: ${ucFirstModelId}Input!) {
+            content: update${ucFirstModelId}(revision: $revision, data: $data) {
+                data {
+                    id
+                    ${createFieldsList(model.fields)}
+                    savedOn
+                    meta { 
+                        ${CONTENT_META_FIELDS} 
+                    }
+                }
+                error ${ERROR_FIELD}
+            }
+        }
+    `;
+};
+
+function createCreateFromMutation(model) {
+    const ucFirstModelId = upperFirst(model.modelId);
+
+    return gql`
+        mutation CmsCreate${ucFirstModelId}From($revision: ID!, $data: ${ucFirstModelId}Input) {
+            content: create${ucFirstModelId}From(revision: $revision, data: $data) {
+                data {
+                    id
+                    savedOn
+                    ${createFieldsList(model.fields)}
+                    meta {
+                        ${CONTENT_META_FIELDS}
+                    }
+                }
+                error ${ERROR_FIELD}
+            }
+        }`;
+};
+
+function createDeleteMutation(model) {
+    const ucFirstModelId = upperFirst(model.modelId);
+
+    return gql`
+        mutation CmsEntriesDelete${ucFirstModelId}($revision: ID!) {
+            content: delete${ucFirstModelId}(revision: $revision) {
+                data
+                error ${ERROR_FIELD}
+            }
+        }
+    `;
+};
+
 function getModelTitleFieldId(model) {
     if (!model.titleFieldId || model.titleFieldId === "id") {
         return "";
@@ -255,5 +308,8 @@ module.exports = {
     createListQuery,
     createReadQuery,
     createCreateMutation,
-    createPublishMutation
+    createPublishMutation,
+    createCreateFromMutation,
+    createDeleteMutation,
+    createUpdateMutation
 };
