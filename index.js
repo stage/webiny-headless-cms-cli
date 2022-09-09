@@ -196,9 +196,10 @@ const importEntriesData = async (data, model) => {
 
                     if (existingEntry) {
                         //console.log("Entry already exists, creating a revision");
-                        
+
                         //Remove Properties that can't be when creating a new entry.
                         entry.id = undefined;
+                        entry.entryId = undefined;
                         entry.createdBy = undefined;
                         entry.savedOn = undefined;
                         entry.meta = undefined;
@@ -231,6 +232,7 @@ const importEntriesData = async (data, model) => {
 
                         //Remove Properties that can't be when creating a new entry.
                         entry.id = undefined;
+                        entry.entryId = undefined;
                         entry.createdBy = undefined;
                         entry.savedOn = undefined;
                         entry.meta = undefined;
@@ -285,6 +287,48 @@ const importEntriesData = async (data, model) => {
     }
 };
 
+const deleteEntries = async (data, model) => {
+    const importClient = new GraphQLClient(config.import.MANAGE_ENDPOINT, {
+        headers: { Authorization: config.import.API_KEY },
+    });
+
+
+    //Delete content entries 
+    const tasks = new Listr([
+        {
+            title: `Delete content entries for model '${model.modelId}'`,
+            task: async (ctx, task) => {
+                const entriesToDelete = data.filter(d => d.id != null)?.map(d => d.id);
+
+                for (let i = 0; i < entriesToDelete?.length; i++) {
+
+                    const id = entriesToDelete[i];
+                    // Delete Entry
+                    task.output = `Deleting "${id}"... `;
+                    let publishQuery = GQL.createDeleteMutation(model);
+                    const deleteResponse = await importClient.request(
+                        publishQuery,
+                        {
+                            revision: id.substring(0, id.indexOf("#")),
+                        }
+                    );
+
+                    if (deleteResponse.content.error) {
+                        ctx.errors.push(deleteResponse.content.error);
+                    }
+
+                }
+            },
+        },
+    ]);
+
+    const context = { errors: [] };
+    const output = await tasks.run(context);
+    if (output.errors.length) {
+        console.error(output.errors);
+    }
+};
+
 (async () => {
     try {
         const { mode } = await inquirer
@@ -300,6 +344,7 @@ const importEntriesData = async (data, model) => {
                         //{ name: "Copy entries data from one system to another", value: "copy-entries" },
                         { name: "Export entries to local file", value: "export-entries-to-file" },
                         { name: "Import entries from a local file", value: "import-entries-from-file" },
+                        { name: "Delete entries specified in a local file", value: "delete-entries-from-file" },
                     ],
                 },
             ]);
@@ -384,6 +429,33 @@ const importEntriesData = async (data, model) => {
                     }
                 }
                 break;
+            case "delete-entries-from-file":
+                {
+                    let tmpFiles = fs.readdirSync(config.import.FROM_PATH)
+                    const { fileToDelete } = await inquirer
+                        .prompt([
+                            {
+                                message: "Which file has the id's of the entries you want to delete?",
+                                name: "fileToDelete",
+                                type: "list",
+                                choices: tmpFiles.map(f => ({ name: f, value: f }))
+                            },
+                        ]);
+
+                    let modalData = await getModelDataFromRemoteImport();
+                    const { model } = await inquirer
+                        .prompt([
+                            {
+                                message: "Which model?",
+                                name: "model",
+                                type: "list",
+                                choices: modalData.listContentModels.data.map(m => ({ name: m.name, value: m }))
+                            },
+                        ]);
+
+                    const entriesDataFromFile = await loadJsonFile(config.export.TO_PATH + "/" + fileToDelete);
+                    await deleteEntries(entriesDataFromFile, model);
+                }
             default:
                 break;
         }
