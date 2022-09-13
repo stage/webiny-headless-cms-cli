@@ -7,3 +7,13 @@ Export Headless CMS content models, content model groups and content entires int
    - `import` key should contain endpoint and API key of the target system
     - optionally, set a `TO_PATH` and `FROM_PATH` if you want to export/import to/from a file
 3) Run `node index.js`
+
+
+## TODOS
+
+- Convert to Typescript
+- Add support for exporting & importing FileManager files
+- Improved logging and error handling.
+- Support parallel updates to speed up import.
+- Consider supporting mapping files.
+- Consider supporting query/filters files to be used to export a subset.

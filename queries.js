@@ -140,8 +140,14 @@ const createReadQuery = (model) => {
             content: get${ucFirstModelId}(revision: $revision) {
                 data {
                     id
+                    entryId
+                    ownedBy {
+                        id
+                        type
+                    }
                     createdBy {
                         id
+                        type
                     }
                     ${createFieldsList(model.fields)}
                     savedOn
@@ -170,8 +176,13 @@ const createListQuery = (model) => {
                 data {
                     id
                     entryId
+                    ownedBy {
+                        id
+                        type
+                    }
                     createdBy {
                         id
+                        type
                     }
                     savedOn
                     meta {
