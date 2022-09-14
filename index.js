@@ -10,6 +10,7 @@ const inquirer = require("inquirer");
 const config = require("./config");
 const GQL = require("./queries");
 const { filter } = require("lodash");
+const { count } = require("console");
 
 
 const getModelDataFromRemoteExport = async () => {
@@ -209,26 +210,32 @@ const importEntriesData = async (data, model) => {
 
                             //Creating a revision
                             let query = GQL.createCreateFromMutation(model);
-                            const createRevisionResponse = await importClient.request(
-                                query,
-                                {
-                                    revision: existingEntry.id,
-                                    data: entry,
+                            try {
+                                const createRevisionResponse = await importClient.request(
+                                    query,
+                                    {
+                                        revision: existingEntry.id,
+                                        data: entry,
+                                    }
+                                );
+
+                                if (!createRevisionResponse) {
+                                    ctx.errors.push(`Failed to create revision ${entry.name}`);
+                                    anyErrors = true;
+                                    return;
                                 }
-                            );
+                                else if (createRevisionResponse.content.error) {
+                                    ctx.errors.push(createRevisionResponse.content.error);
+                                    anyErrors = true;
+                                    return;
+                                }
 
-                            if (!createRevisionResponse) {
-                                ctx.errors.push(`Failed to create revision ${entry.name}`);
-                                anyErrors = true;
-                                return;
+                                newRevisionId = createRevisionResponse.content.data.id;
                             }
-                            else if (createRevisionResponse.content.error) {
-                                ctx.errors.push(createRevisionResponse.content.error);
-                                anyErrors = true;
-                                return;
+                            catch (ex) {
+                                ctx.errors.push(ex);
+                                console.log(`Failed to create revision for '${existingEntry.id}'`)
                             }
-
-                            newRevisionId = createRevisionResponse.content.data.id;
                         } else {
 
                             // Create the Entry
@@ -242,25 +249,31 @@ const importEntriesData = async (data, model) => {
 
                             task.output = `Creating "${entry.name}"...`;
                             let query = GQL.createCreateMutation(model.modelId);
-                            const response = await importClient.request(
-                                query,
-                                {
-                                    data: entry,
+                            try {
+                                const response = await importClient.request(
+                                    query,
+                                    {
+                                        data: entry,
+                                    }
+                                );
+
+                                if (!response) {
+                                    ctx.errors.push(`Failed to create new entry ${entry.name}`);
+                                    anyErrors = true;
+                                    return;
                                 }
-                            );
+                                else if (response.content.error) {
+                                    ctx.errors.push(response.content.error);
+                                    anyErrors = true;
+                                    return;
+                                }
 
-                            if (!response) {
-                                ctx.errors.push(`Failed to create ${entry.name}`);
-                                anyErrors = true;
-                                return;
+                                newRevisionId = response.content.data.id;
                             }
-                            else if (response.content.error) {
-                                ctx.errors.push(response.content.error);
-                                anyErrors = true;
-                                return;
+                            catch (ex) {
+                                ctx.errors.push(ex);
+                                console.log(`Failed to create new entry '${entry.name}'`)
                             }
-
-                            newRevisionId = response.content.data.id;
                         }
 
                         if (publishEntry && newRevisionId) {
@@ -317,15 +330,21 @@ const deleteEntries = async (data, model) => {
                         // Delete Entry
                         task.output = `Deleting "${id}"... `;
                         let publishQuery = GQL.createDeleteMutation(model);
-                        const deleteResponse = await importClient.request(
-                            publishQuery,
-                            {
-                                revision: id.substring(0, id.indexOf("#")),
-                            }
-                        );
+                        try {
+                            const deleteResponse = await importClient.request(
+                                publishQuery,
+                                {
+                                    revision: id.substring(0, id.indexOf("#")),
+                                }
+                            );
 
-                        if (deleteResponse.content.error) {
-                            ctx.errors.push(deleteResponse.content.error);
+                            if (deleteResponse.content.error) {
+                                ctx.errors.push(deleteResponse.content.error);
+                            }
+                        }
+                        catch (ex) {
+                            ctx.errors.push(ex);
+                            console.log(`Failed to delete '${id}'`)
                         }
                     });
 
@@ -406,21 +425,21 @@ const deleteEntries = async (data, model) => {
                 //Select Filter
                 const filterDir = "filters";
                 let tmpFiles = fs.readdirSync(filterDir);
-                let filterChoices = [{name: "None", value: null}];
+                let filterChoices = [{ name: "None", value: null }];
                 filterChoices = filterChoices.concat(tmpFiles.map(f => ({ name: f, value: f })));
                 const { filterFile } = await inquirer
-                .prompt([
-                    {
-                        message: "Which filter would you like to apply?",
-                        name: "filterFile",
-                        type: "list",
-                        choices: filterChoices
-                    },
-                ]); 
+                    .prompt([
+                        {
+                            message: "Which filter would you like to apply?",
+                            name: "filterFile",
+                            type: "list",
+                            choices: filterChoices
+                        },
+                    ]);
 
                 let filter = null;
-                if(filterFile) {
-                    filter = await loadJsonFile(filterDir + "\\" +filterFile);
+                if (filterFile) {
+                    filter = await loadJsonFile(filterDir + "\\" + filterFile);
                 }
 
                 const model = modalData.listContentModels.data.find(m => m.modelId == entryTypeToExport);

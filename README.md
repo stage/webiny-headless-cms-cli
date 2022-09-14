@@ -9,6 +9,10 @@ Export Headless CMS content models, content model groups and content entires int
 3) Run `node index.js`
 
 
+## Filters
+
+For use only when exporting you can create filter files in the "filters" directory. These allow the "where:" field to be applied to the export. See filter-sample.json"for an example.
+
 ## TODOS
 
 - Convert to Typescript
@@ -16,4 +20,4 @@ Export Headless CMS content models, content model groups and content entires int
 - Improved logging and error handling.
 - Support parallel updates to speed up import.
 - Consider supporting mapping files.
-- Consider supporting query/filters files to be used to export a subset.
+
