@@ -9,6 +9,7 @@ const Listr = require("listr");
 const inquirer = require("inquirer");
 const config = require("./config");
 const GQL = require("./queries");
+const { filter } = require("lodash");
 
 
 const getModelDataFromRemoteExport = async () => {
@@ -127,21 +128,21 @@ const importModelData = async (data) => {
     }
 };
 
-const getEntriesDataFromRemoteExport = async (model) => {
+const getEntriesDataFromRemoteExport = async (model, filter = null) => {
     const exportClient = new GraphQLClient(config.export.MANAGE_ENDPOINT, {
         headers: { Authorization: config.export.API_KEY },
     });
-    return getEntriesDataFromRemoteBase(exportClient, model)
+    return getEntriesDataFromRemoteBase(exportClient, model, filter)
 }
 
-const getEntriesDataFromRemoteImport = async (model) => {
+const getEntriesDataFromRemoteImport = async (model, filter = null) => {
     const importClient = new GraphQLClient(config.import.MANAGE_ENDPOINT, {
         headers: { Authorization: config.import.API_KEY },
     });
-    return getEntriesDataFromRemoteBase(importClient, model)
+    return getEntriesDataFromRemoteBase(importClient, model, filter)
 }
 
-const getEntriesDataFromRemoteBase = async (client, model) => {
+const getEntriesDataFromRemoteBase = async (client, model, filter = null) => {
 
     const tasks = new Listr([
         {
@@ -153,7 +154,7 @@ const getEntriesDataFromRemoteBase = async (client, model) => {
 
                 while (counter == 0 || cmsList.content.meta.hasMoreItems == true) {
                     counter++;
-                    cmsList = await client.request(GQL.createListQuery(model), { after: cmsList?.content?.meta?.cursor });
+                    cmsList = await client.request(GQL.createListQuery(model), { where: filter, after: cmsList?.content?.meta?.cursor, limit: 1000 });
                     entries = entries.concat(cmsList.content.data)
                     task.output = `Retrieved ${model.modelId} Batch ${counter} | Items: ${cmsList.content.data.length} of ${cmsList.content.meta.totalCount}`;
                 }
@@ -185,97 +186,105 @@ const importEntriesData = async (data, model) => {
             task: async (ctx, task) => {
                 const entriesToImport = data;
 
+                let funcs = [];
                 for (let i = 0; i < entriesToImport.length; i++) {
+                    funcs.push(async () => {
 
-                    const entry = entriesToImport[i];
-                    let publishEntry = (entry.meta.status == "published")
+                        const entry = entriesToImport[i];
+                        let publishEntry = (entry.meta.status == "published")
 
-                    //Check if and entry already exists for this entryId.
-                    let existingEntry = entry?.id ? remoteEntries.find(re => re.entryId == entry.id.substring(0, entry.id.indexOf("#"))) : null;
-                    let newRevisionId;
+                        //Check if and entry already exists for this entryId.
+                        let existingEntry = entry?.id ? remoteEntries.find(re => re.entryId == entry.id.substring(0, entry.id.indexOf("#"))) : null;
+                        let newRevisionId;
 
-                    if (existingEntry) {
-                        //console.log("Entry already exists, creating a revision");
+                        if (existingEntry) {
+                            //console.log("Entry already exists, creating a revision");
 
-                        //Remove Properties that can't be when creating a new entry.
-                        entry.id = undefined;
-                        entry.entryId = undefined;
-                        entry.createdBy = undefined;
-                        entry.savedOn = undefined;
-                        entry.meta = undefined;
+                            //Remove Properties that can't be when creating a new entry.
+                            entry.id = undefined;
+                            entry.entryId = undefined;
+                            entry.createdBy = undefined;
+                            entry.savedOn = undefined;
+                            entry.meta = undefined;
 
-                        //Creating a revision
-                        let query = GQL.createCreateFromMutation(model);
-                        const createRevisionResponse = await importClient.request(
-                            query,
-                            {
-                                revision: existingEntry.id,
-                                data: entry,
+                            //Creating a revision
+                            let query = GQL.createCreateFromMutation(model);
+                            const createRevisionResponse = await importClient.request(
+                                query,
+                                {
+                                    revision: existingEntry.id,
+                                    data: entry,
+                                }
+                            );
+
+                            if (!createRevisionResponse) {
+                                ctx.errors.push(`Failed to create revision ${entry.name}`);
+                                anyErrors = true;
+                                return;
                             }
-                        );
-
-                        if (!createRevisionResponse) {
-                            ctx.errors.push(`Failed to create revision ${entry.name}`);
-                            anyErrors = true;
-                            continue;
-                        }
-                        else if (createRevisionResponse.content.error) {
-                            ctx.errors.push(createRevisionResponse.content.error);
-                            anyErrors = true;
-                            continue;
-                        }
-
-                        newRevisionId = createRevisionResponse.content.data.id;
-                    } else {
-
-                        // Create the Entry
-
-                        //Remove Properties that can't be when creating a new entry.
-                        entry.id = undefined;
-                        entry.entryId = undefined;
-                        entry.createdBy = undefined;
-                        entry.savedOn = undefined;
-                        entry.meta = undefined;
-
-                        task.output = `Creating "${entry.name}"...`;
-                        let query = GQL.createCreateMutation(model.modelId);
-                        const response = await importClient.request(
-                            query,
-                            {
-                                data: entry,
+                            else if (createRevisionResponse.content.error) {
+                                ctx.errors.push(createRevisionResponse.content.error);
+                                anyErrors = true;
+                                return;
                             }
-                        );
 
-                        if (!response) {
-                            ctx.errors.push(`Failed to create ${entry.name}`);
-                            anyErrors = true;
-                            continue;
-                        }
-                        else if (response.content.error) {
-                            ctx.errors.push(response.content.error);
-                            anyErrors = true;
-                            continue;
-                        }
+                            newRevisionId = createRevisionResponse.content.data.id;
+                        } else {
 
-                        newRevisionId = response.content.data.id;
-                    }
+                            // Create the Entry
 
-                    if (publishEntry && newRevisionId) {
-                        // Publish the model if needed
-                        task.output = `Publish "${entry.name}"... `;
-                        let publishQuery = GQL.createPublishMutation(model.modelId);
-                        const publishResponse = await importClient.request(
-                            publishQuery,
-                            {
-                                revision: newRevisionId,
+                            //Remove Properties that can't be when creating a new entry.
+                            entry.id = undefined;
+                            entry.entryId = undefined;
+                            entry.createdBy = undefined;
+                            entry.savedOn = undefined;
+                            entry.meta = undefined;
+
+                            task.output = `Creating "${entry.name}"...`;
+                            let query = GQL.createCreateMutation(model.modelId);
+                            const response = await importClient.request(
+                                query,
+                                {
+                                    data: entry,
+                                }
+                            );
+
+                            if (!response) {
+                                ctx.errors.push(`Failed to create ${entry.name}`);
+                                anyErrors = true;
+                                return;
                             }
-                        );
+                            else if (response.content.error) {
+                                ctx.errors.push(response.content.error);
+                                anyErrors = true;
+                                return;
+                            }
 
-                        if (publishResponse.content.error) {
-                            ctx.errors.push(publishResponse.content.error);
+                            newRevisionId = response.content.data.id;
                         }
-                    }
+
+                        if (publishEntry && newRevisionId) {
+                            // Publish the model if needed
+                            task.output = `Publish "${entry.name}"... `;
+                            let publishQuery = GQL.createPublishMutation(model.modelId);
+                            const publishResponse = await importClient.request(
+                                publishQuery,
+                                {
+                                    revision: newRevisionId,
+                                }
+                            );
+
+                            if (publishResponse.content.error) {
+                                ctx.errors.push(publishResponse.content.error);
+                            }
+                        }
+                    });
                 }
+                while (funcs.length) {
+                    // Run the functions in batches.
+                    await Promise.all(funcs.splice(0, config.concurrency).map(f => f()))
+                }
+                task.output = `Importing done`;
             },
         },
     ]);
@@ -300,24 +309,33 @@ const deleteEntries = async (data, model) => {
             task: async (ctx, task) => {
                 const entriesToDelete = data.filter(d => d.id != null)?.map(d => d.id);
 
+                let funcs = [];
                 for (let i = 0; i < entriesToDelete?.length; i++) {
 
-                    const id = entriesToDelete[i];
-                    // Delete Entry
-                    task.output = `Deleting "${id}"... `;
-                    let publishQuery = GQL.createDeleteMutation(model);
-                    const deleteResponse = await importClient.request(
-                        publishQuery,
-                        {
-                            revision: id.substring(0, id.indexOf("#")),
-                        }
-                    );
+                    funcs.push(async () => {
+                        const id = entriesToDelete[i];
+                        // Delete Entry
+                        task.output = `Deleting "${id}"... `;
+                        let publishQuery = GQL.createDeleteMutation(model);
+                        const deleteResponse = await importClient.request(
+                            publishQuery,
+                            {
+                                revision: id.substring(0, id.indexOf("#")),
+                            }
+                        );
 
-                    if (deleteResponse.content.error) {
-                        ctx.errors.push(deleteResponse.content.error);
-                    }
+                        if (deleteResponse.content.error) {
+                            ctx.errors.push(deleteResponse.content.error);
+                        }
+                    });
 
                 }
+
+                while (funcs.length) {
+                    // Run the functions in batches.
+                    await Promise.all(funcs.splice(0, config.concurrency).map(f => f()))
+                }
+                task.output = `Deleting done`;
             },
         },
     ]);
@@ -385,8 +403,28 @@ const deleteEntries = async (data, model) => {
                         },
                     ]);
 
+                //Select Filter
+                const filterDir = "filters";
+                let tmpFiles = fs.readdirSync(filterDir);
+                let filterChoices = [{name: "None", value: null}];
+                filterChoices = filterChoices.concat(tmpFiles.map(f => ({ name: f, value: f })));
+                const { filterFile } = await inquirer
+                .prompt([
+                    {
+                        message: "Which filter would you like to apply?",
+                        name: "filterFile",
+                        type: "list",
+                        choices: filterChoices
+                    },
+                ]); 
+
+                let filter = null;
+                if(filterFile) {
+                    filter = await loadJsonFile(filterDir + "\\" +filterFile);
+                }
+
                 const model = modalData.listContentModels.data.find(m => m.modelId == entryTypeToExport);
-                const entriesDataFromRemote = await getEntriesDataFromRemoteExport(model);
+                const entriesDataFromRemote = await getEntriesDataFromRemoteExport(model, filter);
                 await writeJsonFile(path.resolve(config.export.TO_PATH + "/exported-entries." + model.modelId + ".json"), entriesDataFromRemote);
 
                 break;

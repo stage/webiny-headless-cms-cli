@@ -20,5 +20,6 @@ module.exports = {
         API_KEY: environments.production.API_KEY,
         FROM_PATH: "./tmp/",
     },
+    concurrency: 5
 };
 

@@ -10,3 +10,5 @@ node_modules
 !.yarn/versions
 .pnp.*
 tmp
+filters/*
+!filter-sample.json
