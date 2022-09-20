@@ -205,6 +205,7 @@ const importEntriesData = async (data, model) => {
                             entry.id = undefined;
                             entry.entryId = undefined;
                             entry.createdBy = undefined;
+                            entry.ownedBy = undefined;
                             entry.savedOn = undefined;
                             entry.meta = undefined;
 
